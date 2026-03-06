@@ -71,24 +71,23 @@ class STTProxyClient:
         Raises STTProxyConnectionError if the WebSocket connection drops.
         Raises STTProxyError on protocol-level errors (connection still usable).
         """
-        if (ws := self._ws) is None or ws.closed:
+        if self._ws is None or self._ws.closed:
             msg = "WebSocket is not connected"
             raise STTProxyConnectionError(msg)
 
         try:
-            return await self._run_session(ws, metadata, stream)
+            return await self._run_session(metadata, stream)
         except aiohttp.ClientError as err:
             msg = f"WebSocket send failed: {err}"
             raise STTProxyConnectionError(msg) from err
 
     async def _run_session(
         self,
-        ws: aiohttp.ClientWebSocketResponse,
         metadata: SpeechMetadata,
         stream: AsyncIterable[bytes],
     ) -> str | None:
         """Execute the send/receive session protocol."""
-        await ws.send_json(
+        await self._ws.send_json(
             {
                 "language": metadata.language,
                 "format": metadata.format.value,
@@ -105,14 +104,12 @@ class STTProxyClient:
 
         try:
             async for chunk in stream:
-                # If the receive task is done, we've received an error, stop sending
-                # chunks.
                 if receive_task.done():
                     break
-                await ws.send_bytes(chunk)
+                await self._ws.send_bytes(chunk)
 
             if not receive_task.done():
-                await ws.send_json({"type": "stop_session"})
+                await self._ws.send_json({"type": "stop_session"})
         except Exception:
             if not receive_task.done():
                 receive_task.cancel()
@@ -123,7 +120,9 @@ class STTProxyClient:
                     receive_task.result()
             raise
 
-        response = receive_task.result() if receive_task.done() else await receive_task
+        response = (
+            receive_task.result() if receive_task.done() else await receive_task
+        )
         return self._handle_session_ended(response)
 
     @staticmethod
@@ -148,12 +147,7 @@ class STTProxyClient:
 
         Raises STTProxyConnectionError on closed/error frames.
         """
-        ws = self._ws
-        if ws is None:
-            msg = "WebSocket is not connected"
-            raise STTProxyConnectionError(msg)
-
-        received = await ws.receive()
+        received = await self._ws.receive()
 
         if received.type == aiohttp.WSMsgType.TEXT:
             return received.json()
