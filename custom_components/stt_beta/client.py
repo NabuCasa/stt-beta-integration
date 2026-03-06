@@ -58,8 +58,8 @@ class STTProxyClient:
     async def disconnect(self) -> None:
         """Close the WebSocket connection."""
         if self._ws is not None and not self._ws.closed:
-            await self._ws.close()
-        self._ws = None
+            with contextlib.suppress(aiohttp.ClientError):
+                await self._ws.close()
         _LOGGER.debug("Disconnected from STT proxy")
 
     async def transcribe(
@@ -72,11 +72,11 @@ class STTProxyClient:
         Raises STTProxyConnectionError if the WebSocket connection drops.
         Raises STTProxyError on protocol-level errors (connection still usable).
         """
-        if self._ws is None or self._ws.closed:
-            msg = "WebSocket is not connected"
-            raise STTProxyConnectionError(msg)
-
         async with self._session_lock:
+            if self._ws is None or self._ws.closed:
+                msg = "WebSocket is not connected"
+                raise STTProxyConnectionError(msg)
+
             try:
                 return await self._run_session(metadata, stream)
             except aiohttp.ClientError as err:
