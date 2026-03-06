@@ -41,6 +41,7 @@ class STTProxyClient:
         self._url = url
         self._token = token
         self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._session_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         """Open the WebSocket connection to the STT proxy.
@@ -75,11 +76,12 @@ class STTProxyClient:
             msg = "WebSocket is not connected"
             raise STTProxyConnectionError(msg)
 
-        try:
-            return await self._run_session(metadata, stream)
-        except aiohttp.ClientError as err:
-            msg = f"WebSocket send failed: {err}"
-            raise STTProxyConnectionError(msg) from err
+        async with self._session_lock:
+            try:
+                return await self._run_session(metadata, stream)
+            except aiohttp.ClientError as err:
+                msg = f"WebSocket send failed: {err}"
+                raise STTProxyConnectionError(msg) from err
 
     async def _run_session(
         self,
@@ -150,7 +152,11 @@ class STTProxyClient:
         received = await self._ws.receive()
 
         if received.type == aiohttp.WSMsgType.TEXT:
-            return received.json()
+            try:
+                return received.json()
+            except ValueError as err:
+                msg = f"Invalid JSON in WebSocket message: {received.data!r}"
+                raise STTProxyError(msg) from err
 
         if received.type in (
             aiohttp.WSMsgType.CLOSED,
