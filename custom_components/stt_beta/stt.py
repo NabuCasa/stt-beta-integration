@@ -99,7 +99,9 @@ class STTBetaEntity(SpeechToTextEntity):
             text = await self._client.transcribe(metadata, stream)
         except STTProxyConnectionError:
             _LOGGER.exception("STT proxy connection lost, scheduling reload")
-            self._config_entry.async_schedule_reload(self.hass)
+            self.hass.config_entries.async_schedule_reload(
+                self._config_entry.entry_id
+            )
             return SpeechResult(text=None, result=SpeechResultState.ERROR)
         except STTProxyError:
             _LOGGER.exception("STT proxy error during transcription")
