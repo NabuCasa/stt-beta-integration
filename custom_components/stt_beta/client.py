@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -43,16 +42,11 @@ class STTProxyClient:
         self._token = token
         self._ws: aiohttp.ClientWebSocketResponse | None = None
 
-    @property
-    def connected(self) -> bool:
-        """Return True if the WebSocket connection is open."""
-        return self._ws is not None and not self._ws.closed
-
     async def connect(self) -> None:
         """Open the WebSocket connection to the STT proxy.
 
         Raises aiohttp.ClientError if the server is unreachable.
-        """  # noqa: D213
+        """
         self._ws = await self._session.ws_connect(
             self._url,
             headers={"Authorization": f"Bearer {self._token}"},
@@ -76,13 +70,24 @@ class STTProxyClient:
 
         Raises STTProxyConnectionError if the WebSocket connection drops.
         Raises STTProxyError on protocol-level errors (connection still usable).
-        """  # noqa: D213
-        if not self.connected:
+        """
+        if (ws := self._ws) is None or ws.closed:
             msg = "WebSocket is not connected"
             raise STTProxyConnectionError(msg)
 
-        ws = self._ws
+        try:
+            return await self._run_session(ws, metadata, stream)
+        except aiohttp.ClientError as err:
+            msg = f"WebSocket send failed: {err}"
+            raise STTProxyConnectionError(msg) from err
 
+    async def _run_session(
+        self,
+        ws: aiohttp.ClientWebSocketResponse,
+        metadata: SpeechMetadata,
+        stream: AsyncIterable[bytes],
+    ) -> str | None:
+        """Execute the send/receive session protocol."""
         await ws.send_json(
             {
                 "language": metadata.language,
@@ -100,6 +105,8 @@ class STTProxyClient:
 
         try:
             async for chunk in stream:
+                # If the receive task is done, we've received an error, stop sending
+                # chunks.
                 if receive_task.done():
                     break
                 await ws.send_bytes(chunk)
@@ -111,11 +118,12 @@ class STTProxyClient:
                 receive_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await receive_task
+            else:
+                with contextlib.suppress(Exception):
+                    receive_task.result()
             raise
 
-        response = (
-            receive_task.result() if receive_task.done() else await receive_task
-        )
+        response = receive_task.result() if receive_task.done() else await receive_task
         return self._handle_session_ended(response)
 
     @staticmethod
@@ -139,7 +147,7 @@ class STTProxyClient:
         """Receive a JSON text frame from the WebSocket.
 
         Raises STTProxyConnectionError on closed/error frames.
-        """  # noqa: D213
+        """
         ws = self._ws
         if ws is None:
             msg = "WebSocket is not connected"
@@ -148,7 +156,7 @@ class STTProxyClient:
         received = await ws.receive()
 
         if received.type == aiohttp.WSMsgType.TEXT:
-            return json.loads(received.data)
+            return received.json()
 
         if received.type in (
             aiohttp.WSMsgType.CLOSED,
