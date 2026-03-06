@@ -61,7 +61,7 @@ class STTProxyClient:
 
     async def disconnect(self) -> None:
         """Close the WebSocket connection."""
-        self._stop_idle_listener()
+        await self._stop_idle_listener()
         if self._ws is not None and not self._ws.closed:
             with contextlib.suppress(aiohttp.ClientError):
                 await self._ws.close()
@@ -71,29 +71,34 @@ class STTProxyClient:
         """Start a background task that monitors for connection drops."""
         self._idle_task = asyncio.create_task(self._idle_listen())
 
-    def _stop_idle_listener(self) -> None:
-        """Cancel the idle listener if running."""
+    async def _stop_idle_listener(self) -> None:
+        """Cancel and await the idle listener task."""
         if self._idle_task is not None and not self._idle_task.done():
             self._idle_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._idle_task
         self._idle_task = None
 
     async def _idle_listen(self) -> None:
-        """Wait for a message while idle; any frame means trouble."""
+        """Wait for a message while idle; any frame indicates a problem."""
         try:
             received = await self._ws.receive()
         except asyncio.CancelledError:
             return
-
-        if received.type in (
-            aiohttp.WSMsgType.CLOSED,
-            aiohttp.WSMsgType.CLOSING,
-            aiohttp.WSMsgType.ERROR,
-        ):
-            _LOGGER.warning("STT proxy connection lost while idle")
+        except Exception:
+            _LOGGER.exception("Unexpected error on STT proxy WebSocket")
         else:
-            _LOGGER.warning(
-                "Unexpected message from STT proxy while idle: %s", received.type
-            )
+            if received.type in (
+                aiohttp.WSMsgType.CLOSED,
+                aiohttp.WSMsgType.CLOSING,
+                aiohttp.WSMsgType.ERROR,
+            ):
+                _LOGGER.warning("STT proxy connection lost while idle")
+            else:
+                _LOGGER.warning(
+                    "Unexpected message from STT proxy while idle: %s",
+                    received.type,
+                )
 
         if self._on_disconnect is not None:
             self._on_disconnect()
@@ -109,7 +114,7 @@ class STTProxyClient:
         Raises STTProxyError on protocol-level errors (connection still usable).
         """
         async with self._session_lock:
-            self._stop_idle_listener()
+            await self._stop_idle_listener()
 
             if self._ws is None or self._ws.closed:
                 msg = "WebSocket is not connected"
