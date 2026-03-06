@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterable
+from typing import TYPE_CHECKING
 
 from homeassistant.components.stt import (
     AudioBitRates,
@@ -11,16 +11,22 @@ from homeassistant.components.stt import (
     AudioCodecs,
     AudioFormats,
     AudioSampleRates,
-    SpeechMetadata,
     SpeechResult,
     SpeechResultState,
     SpeechToTextEntity,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import DOMAIN
+from .client import STTProxyClient, STTProxyConnectionError, STTProxyError
+from .const import SUPPORTED_LANGUAGES
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterable
+
+    from homeassistant.components.stt import SpeechMetadata
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +37,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the STT Beta entity from a config entry."""
-    async_add_entities([STTBetaEntity(config_entry)])
+    client: STTProxyClient = hass.data[DOMAIN][config_entry.entry_id]
+    async_add_entities([STTBetaEntity(config_entry, client)])
 
 
 class STTBetaEntity(SpeechToTextEntity):
@@ -39,15 +46,18 @@ class STTBetaEntity(SpeechToTextEntity):
 
     _attr_name = "STT Beta"
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
+    def __init__(
+        self, config_entry: ConfigEntry, client: STTProxyClient
+    ) -> None:
         """Initialize the STT Beta entity."""
         self._config_entry = config_entry
         self._attr_unique_id = config_entry.entry_id
+        self._client = client
 
     @property
     def supported_languages(self) -> list[str]:
         """Return a list of supported languages."""
-        return ["en-US"]
+        return SUPPORTED_LANGUAGES
 
     @property
     def supported_formats(self) -> list[AudioFormats]:
@@ -77,23 +87,25 @@ class STTBetaEntity(SpeechToTextEntity):
     async def async_process_audio_stream(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
     ) -> SpeechResult:
-        """Process an audio stream to STT service.
-
-        TODO: Implement full STT backend processing here.
-        Consume the audio stream and return the transcribed text.
-        """
+        """Process an audio stream via the STT proxy WebSocket."""
         _LOGGER.debug(
-            "Received audio stream: language=%s, format=%s, codec=%s",
+            "Starting transcription: language=%s, format=%s, codec=%s",
             metadata.language,
             metadata.format,
             metadata.codec,
         )
 
-        # Drain the stream and track total bytes received
-        total_bytes = 0
-        async for chunk in stream:
-            total_bytes += len(chunk)
-        _LOGGER.debug("Received %d bytes of audio data", total_bytes)
+        try:
+            text = await self._client.transcribe(metadata, stream)
+        except STTProxyConnectionError:
+            _LOGGER.exception("STT proxy connection lost, scheduling reload")
+            self._config_entry.async_schedule_reload(self.hass)
+            return SpeechResult(text=None, result=SpeechResultState.ERROR)
+        except STTProxyError:
+            _LOGGER.exception("STT proxy error during transcription")
+            return SpeechResult(text=None, result=SpeechResultState.ERROR)
 
-        # Stub: return an error result until a real STT backend is wired up
-        return SpeechResult(text=None, result=SpeechResultState.ERROR)
+        if text is None:
+            _LOGGER.debug("Transcription completed but no speech was detected")
+            return SpeechResult(text=None, result=SpeechResultState.ERROR)
+        return SpeechResult(text=text, result=SpeechResultState.SUCCESS)
