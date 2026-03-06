@@ -61,6 +61,7 @@ class STTProxyClient:
 
     async def disconnect(self) -> None:
         """Close the WebSocket connection."""
+        self._on_disconnect = None
         await self._stop_idle_listener()
         if self._ws is not None and not self._ws.closed:
             with contextlib.suppress(aiohttp.ClientError):
@@ -101,7 +102,10 @@ class STTProxyClient:
                 )
 
         if self._on_disconnect is not None:
-            self._on_disconnect()
+            try:
+                self._on_disconnect()
+            except Exception:
+                _LOGGER.exception("Error in STT proxy disconnect callback")
 
     async def transcribe(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
