@@ -28,6 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session,
         entry.data[CONF_STT_SERVICE_URL],
         entry.data[CONF_STT_SERVICE_KEY],
+        on_disconnect=lambda: hass.config_entries.async_schedule_reload(entry.entry_id),
     )
 
     try:
