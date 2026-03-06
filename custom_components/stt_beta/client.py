@@ -112,7 +112,7 @@ class STTProxyClient:
 
             if not receive_task.done():
                 await self._ws.send_json({"type": "stop_session"})
-        except Exception:
+        except BaseException:
             if not receive_task.done():
                 receive_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
