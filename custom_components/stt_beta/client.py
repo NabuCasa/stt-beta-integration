@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterable
+    from collections.abc import AsyncIterable, Callable
 
     from homeassistant.components.stt import SpeechMetadata
 
@@ -35,13 +35,16 @@ class STTProxyClient:
         session: aiohttp.ClientSession,
         url: str,
         token: str,
+        on_disconnect: Callable[[], None] | None = None,
     ) -> None:
         """Initialize the client."""
         self._session = session
         self._url = url
         self._token = token
+        self._on_disconnect = on_disconnect
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session_lock = asyncio.Lock()
+        self._idle_task: asyncio.Task[None] | None = None
 
     async def connect(self) -> None:
         """Open the WebSocket connection to the STT proxy.
@@ -54,13 +57,46 @@ class STTProxyClient:
             heartbeat=HEARTBEAT_INTERVAL,
         )
         _LOGGER.debug("Connected to STT proxy at %s", self._url)
+        self._start_idle_listener()
 
     async def disconnect(self) -> None:
         """Close the WebSocket connection."""
+        self._stop_idle_listener()
         if self._ws is not None and not self._ws.closed:
             with contextlib.suppress(aiohttp.ClientError):
                 await self._ws.close()
         _LOGGER.debug("Disconnected from STT proxy")
+
+    def _start_idle_listener(self) -> None:
+        """Start a background task that monitors for connection drops."""
+        self._idle_task = asyncio.create_task(self._idle_listen())
+
+    def _stop_idle_listener(self) -> None:
+        """Cancel the idle listener if running."""
+        if self._idle_task is not None and not self._idle_task.done():
+            self._idle_task.cancel()
+        self._idle_task = None
+
+    async def _idle_listen(self) -> None:
+        """Wait for a message while idle; any frame means trouble."""
+        try:
+            received = await self._ws.receive()
+        except asyncio.CancelledError:
+            return
+
+        if received.type in (
+            aiohttp.WSMsgType.CLOSED,
+            aiohttp.WSMsgType.CLOSING,
+            aiohttp.WSMsgType.ERROR,
+        ):
+            _LOGGER.warning("STT proxy connection lost while idle")
+        else:
+            _LOGGER.warning(
+                "Unexpected message from STT proxy while idle: %s", received.type
+            )
+
+        if self._on_disconnect is not None:
+            self._on_disconnect()
 
     async def transcribe(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
@@ -73,6 +109,8 @@ class STTProxyClient:
         Raises STTProxyError on protocol-level errors (connection still usable).
         """
         async with self._session_lock:
+            self._stop_idle_listener()
+
             if self._ws is None or self._ws.closed:
                 msg = "WebSocket is not connected"
                 raise STTProxyConnectionError(msg)
@@ -82,6 +120,9 @@ class STTProxyClient:
             except aiohttp.ClientError as err:
                 msg = f"WebSocket send failed: {err}"
                 raise STTProxyConnectionError(msg) from err
+            finally:
+                if self._ws is not None and not self._ws.closed:
+                    self._start_idle_listener()
 
     async def _run_session(
         self,
@@ -115,7 +156,9 @@ class STTProxyClient:
         except BaseException:
             if not receive_task.done():
                 receive_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, STTProxyConnectionError):
+                with contextlib.suppress(
+                    asyncio.CancelledError, STTProxyConnectionError
+                ):
                     await receive_task
             else:
                 with contextlib.suppress(Exception):
