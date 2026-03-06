@@ -16,29 +16,28 @@ from homeassistant.components.stt import (
     SpeechToTextEntity,
 )
 
-from . import DOMAIN
-from .client import STTProxyClient, STTProxyConnectionError, STTProxyError
+from .client import STTProxyConnectionError, STTProxyError
 from .const import SUPPORTED_LANGUAGES
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterable
 
     from homeassistant.components.stt import SpeechMetadata
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+    from . import STTBetaConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    hass: HomeAssistant,  # noqa: ARG001
+    config_entry: STTBetaConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the STT Beta entity from a config entry."""
-    client: STTProxyClient = hass.data[DOMAIN][config_entry.entry_id]
-    async_add_entities([STTBetaEntity(config_entry, client)])
+    async_add_entities([STTBetaEntity(config_entry)])
 
 
 class STTBetaEntity(SpeechToTextEntity):
@@ -46,13 +45,11 @@ class STTBetaEntity(SpeechToTextEntity):
 
     _attr_name = "STT Beta"
 
-    def __init__(
-        self, config_entry: ConfigEntry, client: STTProxyClient
-    ) -> None:
+    def __init__(self, config_entry: STTBetaConfigEntry) -> None:
         """Initialize the STT Beta entity."""
         self._config_entry = config_entry
         self._attr_unique_id = config_entry.entry_id
-        self._client = client
+        self._client = config_entry.runtime_data
 
     @property
     def supported_languages(self) -> list[str]:
