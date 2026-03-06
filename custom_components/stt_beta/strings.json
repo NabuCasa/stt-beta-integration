@@ -1,0 +1,14 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "STT Beta",
+        "description": "Configure your STT service connection.",
+        "data": {
+          "stt_service_url": "STT Service URL",
+          "stt_service_key": "STT Service Key"
+        }
+      }
+    }
+  }
+}
