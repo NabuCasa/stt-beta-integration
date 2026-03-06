@@ -105,4 +105,7 @@ class STTBetaEntity(SpeechToTextEntity):
             _LOGGER.exception("STT proxy error during transcription")
             return SpeechResult(text=None, result=SpeechResultState.ERROR)
 
+        if text is None:
+            _LOGGER.debug("Transcription completed but no speech was detected")
+            return SpeechResult(text=None, result=SpeechResultState.ERROR)
         return SpeechResult(text=text, result=SpeechResultState.SUCCESS)
