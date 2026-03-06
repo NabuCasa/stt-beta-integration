@@ -115,7 +115,7 @@ class STTProxyClient:
         except BaseException:
             if not receive_task.done():
                 receive_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                with contextlib.suppress(asyncio.CancelledError, STTProxyConnectionError):
                     await receive_task
             else:
                 with contextlib.suppress(Exception):
