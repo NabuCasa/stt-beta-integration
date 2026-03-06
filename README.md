@@ -21,6 +21,6 @@ After installation, add the integration through **Settings → Devices & Service
 
 ## Development
 
-This integration is a stub implementation of the Home Assistant
-[Speech-to-Text entity API](https://developers.home-assistant.io/docs/core/entity/stt/).
-The `async_process_audio_stream` method is ready for a full STT backend implementation.
+This integration implements the Home Assistant
+[Speech-to-Text entity API](https://developers.home-assistant.io/docs/core/entity/stt/)
+by streaming audio to a remote STT proxy server over a persistent WebSocket connection.

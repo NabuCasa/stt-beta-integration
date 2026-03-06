@@ -82,9 +82,6 @@ class STTProxyClient:
             raise STTProxyConnectionError(msg)
 
         ws = self._ws
-        if ws is None:
-            msg = "WebSocket is not connected"
-            raise STTProxyConnectionError(msg)
 
         await ws.send_json(
             {
@@ -97,7 +94,7 @@ class STTProxyClient:
             }
         )
 
-        receive_task: asyncio.Task[dict[str, Any]] = asyncio.ensure_future(
+        receive_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
             self._receive_json()
         )
 
@@ -162,4 +159,4 @@ class STTProxyClient:
             raise STTProxyConnectionError(msg)
 
         msg = f"Unexpected WebSocket message type: {received.type}"
-        raise STTProxyConnectionError(msg)
+        raise STTProxyError(msg)
