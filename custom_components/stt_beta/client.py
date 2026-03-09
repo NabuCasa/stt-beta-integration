@@ -124,6 +124,12 @@ class STTProxyClient:
             response = await self._receive_json()
             self._handle_session_ended(response)
             _LOGGER.debug("Stale session cleared")
+        except STTProxyConnectionError:
+            raise
+        except STTProxyError:
+            _LOGGER.warning(
+                "Failed to cleanly clear stale session, proceeding anyway"
+            )
         finally:
             self._session_active = False
 
