@@ -119,10 +119,13 @@ class STTProxyClient:
     async def _clear_stale_session(self) -> None:
         """Send stop_session to clear a stale server-side session."""
         _LOGGER.warning("Stale session detected, sending stop_session to clear")
-        await self._ws.send_json({"type": "stop_session"})
-        response = await self._receive_json()
-        self._handle_session_ended(response)
-        _LOGGER.debug("Stale session cleared")
+        try:
+            await self._ws.send_json({"type": "stop_session"})
+            response = await self._receive_json()
+            self._handle_session_ended(response)
+            _LOGGER.debug("Stale session cleared")
+        finally:
+            self._session_active = False
 
     async def transcribe(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
