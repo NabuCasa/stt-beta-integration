@@ -52,6 +52,7 @@ class STTProxyClient:
         self._on_disconnect = on_disconnect
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session_lock = asyncio.Lock()
+        self._session_active = False
         self._idle_task: asyncio.Task[None] | None = None
 
     async def connect(self) -> None:
@@ -115,6 +116,14 @@ class STTProxyClient:
             except Exception:
                 _LOGGER.exception("Error in STT proxy disconnect callback")
 
+    async def _clear_stale_session(self) -> None:
+        """Send stop_session to clear a stale server-side session."""
+        _LOGGER.warning("Stale session detected, sending stop_session to clear")
+        await self._ws.send_json({"type": "stop_session"})
+        response = await self._receive_json()
+        self._handle_session_ended(response)
+        _LOGGER.debug("Stale session cleared")
+
     async def transcribe(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
     ) -> str | None:
@@ -131,6 +140,9 @@ class STTProxyClient:
             if self._ws is None or self._ws.closed:
                 msg = "WebSocket is not connected"
                 raise STTProxyConnectionError(msg)
+
+            if self._session_active:
+                await self._clear_stale_session()
 
             try:
                 return await self._run_session(metadata, stream)
@@ -157,6 +169,7 @@ class STTProxyClient:
                 "channel": AudioChannels(metadata.channel).value,
             }
         )
+        self._session_active = True
 
         receive_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
             self._receive_json()
@@ -184,8 +197,6 @@ class STTProxyClient:
                 await self._ws.send_json({"type": "stop_session"})
         except BaseException:
             if not receive_task.done():
-                with contextlib.suppress(Exception):
-                    await self._ws.send_json({"type": "stop_session"})
                 receive_task.cancel()
                 with contextlib.suppress(
                     asyncio.CancelledError, STTProxyConnectionError
@@ -199,19 +210,17 @@ class STTProxyClient:
         response = receive_task.result() if receive_task.done() else await receive_task
         return self._handle_session_ended(response)
 
-    @staticmethod
-    def _handle_session_ended(response: dict[str, Any]) -> str | None:
+    def _handle_session_ended(self, response: dict[str, Any]) -> str | None:
         """Extract the transcript from a session_ended response."""
         match response:
             case {"type": "session_ended", "reason": reason, **rest}:
+                self._session_active = False
                 if reason != "finished":
                     msg = f"Session ended with reason: {reason}"
                     raise STTProxyError(msg)
                 transcript = rest.get("transcript")
                 _LOGGER.debug("Transcription complete: %s", transcript)
                 return transcript
-            case {"error": "session already active"}:
-                raise STTProxyConnectionError("session already active")
             case {"error": error}:
                 raise STTProxyError(error)
             case _:
