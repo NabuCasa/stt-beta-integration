@@ -59,13 +59,17 @@ class STTProxyClient:
 
         Raises aiohttp.ClientError if the server is unreachable.
         """
+        await self._connect_ws()
+        self._start_idle_listener()
+
+    async def _connect_ws(self) -> None:
+        """Open the raw WebSocket connection without starting the idle listener."""
         self._ws = await self._session.ws_connect(
             self._url,
             headers={"Authorization": f"Bearer {self._token}"},
             heartbeat=HEARTBEAT_INTERVAL,
         )
         _LOGGER.debug("Connected to STT proxy at %s", self._url)
-        self._start_idle_listener()
 
     async def disconnect(self) -> None:
         """Close the WebSocket connection."""
@@ -121,18 +125,17 @@ class STTProxyClient:
         """Run a full transcription session on the persistent connection.
 
         Returns the transcript text, or None if no speech was detected.
+        Automatically reconnects if the WebSocket is closed.
 
-        Raises STTProxyConnectionError if the WebSocket connection drops.
-        Raises STTProxyError on protocol-level errors (connection still usable).
+        Raises STTProxyConnectionError if the connection (or reconnection) fails.
+        Raises STTProxyError on protocol-level errors.
         """
         async with self._session_lock:
             await self._stop_idle_listener()
 
-            if self._ws is None or self._ws.closed:
-                msg = "WebSocket is not connected"
-                raise STTProxyConnectionError(msg)
-
             try:
+                if self._ws is None or self._ws.closed:
+                    await self._connect_ws()
                 return await self._run_session(metadata, stream)
             except aiohttp.ClientError as err:
                 msg = f"WebSocket send failed: {err}"
@@ -146,7 +149,11 @@ class STTProxyClient:
         metadata: SpeechMetadata,
         stream: AsyncIterable[bytes],
     ) -> str | None:
-        """Execute the send/receive session protocol."""
+        """Execute the send/receive session protocol.
+
+        If an exception interrupts audio streaming, the WebSocket is closed so
+        the next ``transcribe`` call starts with a guaranteed-clean connection.
+        """
         await self._ws.send_json(
             {
                 "language": metadata.language,
@@ -185,13 +192,14 @@ class STTProxyClient:
         except BaseException:
             if not receive_task.done():
                 receive_task.cancel()
-                with contextlib.suppress(
-                    asyncio.CancelledError, STTProxyConnectionError
-                ):
+                with contextlib.suppress(asyncio.CancelledError, STTProxyError):
                     await receive_task
             else:
                 with contextlib.suppress(Exception):
                     receive_task.result()
+            with contextlib.suppress(Exception):
+                await self._ws.close()
+            self._ws = None
             raise
 
         response = receive_task.result() if receive_task.done() else await receive_task
