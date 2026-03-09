@@ -8,11 +8,19 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+from homeassistant.components.stt import (
+    AudioBitRates,
+    AudioChannels,
+    AudioCodecs,
+    AudioFormats,
+    AudioSampleRates,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterable, Callable
 
     from homeassistant.components.stt import SpeechMetadata
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -142,11 +150,11 @@ class STTProxyClient:
         await self._ws.send_json(
             {
                 "language": metadata.language,
-                "format": metadata.format.value,
-                "codec": metadata.codec.value,
-                "bit_rate": metadata.bit_rate.value,
-                "sample_rate": metadata.sample_rate.value,
-                "channel": metadata.channel.value,
+                "format": AudioFormats(metadata.format).value,
+                "codec": AudioCodecs(metadata.codec).value,
+                "bit_rate": AudioBitRates(metadata.bit_rate).value,
+                "sample_rate": AudioSampleRates(metadata.sample_rate).value,
+                "channel": AudioChannels(metadata.channel).value,
             }
         )
 
@@ -155,10 +163,22 @@ class STTProxyClient:
         )
 
         try:
+            chunk_buffer = bytearray()
             async for chunk in stream:
                 if receive_task.done():
                     break
-                await self._ws.send_bytes(chunk)
+
+                # Ensure chunk size is a multiple of 2
+                chunk_buffer.extend(chunk)
+                if len(chunk_buffer) % 2 != 0:
+                    chunk = chunk_buffer[:-1]
+                    chunk_buffer = chunk_buffer[-1:]
+                else:
+                    chunk = chunk_buffer
+                    chunk_buffer = bytearray()
+
+                if chunk:
+                    await self._ws.send_bytes(chunk)
 
             if not receive_task.done():
                 await self._ws.send_json({"type": "stop_session"})
@@ -174,9 +194,7 @@ class STTProxyClient:
                     receive_task.result()
             raise
 
-        response = (
-            receive_task.result() if receive_task.done() else await receive_task
-        )
+        response = receive_task.result() if receive_task.done() else await receive_task
         return self._handle_session_ended(response)
 
     @staticmethod
