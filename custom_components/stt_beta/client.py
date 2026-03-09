@@ -184,6 +184,8 @@ class STTProxyClient:
                 await self._ws.send_json({"type": "stop_session"})
         except BaseException:
             if not receive_task.done():
+                with contextlib.suppress(Exception):
+                    await self._ws.send_json({"type": "stop_session"})
                 receive_task.cancel()
                 with contextlib.suppress(
                     asyncio.CancelledError, STTProxyConnectionError
@@ -208,6 +210,8 @@ class STTProxyClient:
                 transcript = rest.get("transcript")
                 _LOGGER.debug("Transcription complete: %s", transcript)
                 return transcript
+            case {"error": "session already active"}:
+                raise STTProxyConnectionError("session already active")
             case {"error": error}:
                 raise STTProxyError(error)
             case _:
