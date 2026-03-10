@@ -162,6 +162,9 @@ class STTProxyClient:
                 "bit_rate": AudioBitRates(metadata.bit_rate).value,
                 "sample_rate": AudioSampleRates(metadata.sample_rate).value,
                 "channel": AudioChannels(metadata.channel).value,
+                "options": {
+                    "endpointing": True,
+                },
             }
         )
 
