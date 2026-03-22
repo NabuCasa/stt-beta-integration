@@ -27,6 +27,12 @@ _LOGGER = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL = 300
 
 
+def _raise_incomplete_pcm_frame() -> None:
+    """Raise an error for a truncated PCM frame."""
+    msg = "Incomplete PCM audio frame received from stream"
+    raise STTProxyError(msg)
+
+
 class STTProxyError(Exception):
     """Raised on protocol-level errors from the STT proxy."""
 
@@ -113,6 +119,11 @@ class STTProxyClient:
                     received.type,
                 )
 
+        if self._ws is not None and not self._ws.closed:
+            with contextlib.suppress(aiohttp.ClientError):
+                await self._ws.close()
+        self._ws = None
+
         if self._on_disconnect is not None:
             try:
                 self._on_disconnect()
@@ -169,26 +180,36 @@ class STTProxyClient:
         )
 
         receive_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
-            self._receive_json()
+            self._receive_terminal_response()
         )
 
         try:
             chunk_buffer = bytearray()
-            async for chunk in stream:
+            pcm_codec = AudioCodecs(metadata.codec) is AudioCodecs.PCM
+            stream_exhausted = True
+
+            async for stream_chunk in stream:
                 if receive_task.done():
+                    stream_exhausted = False
                     break
 
-                # Ensure chunk size is a multiple of 2
-                chunk_buffer.extend(chunk)
-                if len(chunk_buffer) % 2 != 0:
-                    chunk = chunk_buffer[:-1]
-                    chunk_buffer = chunk_buffer[-1:]
-                else:
-                    chunk = chunk_buffer
-                    chunk_buffer = bytearray()
+                audio_chunk = stream_chunk
+                if pcm_codec:
+                    # Keep PCM samples aligned to 16-bit frames across chunk
+                    # boundaries instead of silently dropping trailing bytes.
+                    chunk_buffer.extend(stream_chunk)
+                    if len(chunk_buffer) % 2 != 0:
+                        audio_chunk = bytes(chunk_buffer[:-1])
+                        chunk_buffer = bytearray(chunk_buffer[-1:])
+                    else:
+                        audio_chunk = bytes(chunk_buffer)
+                        chunk_buffer = bytearray()
 
-                if chunk:
-                    await self._ws.send_bytes(chunk)
+                if audio_chunk:
+                    await self._ws.send_bytes(audio_chunk)
+
+            if pcm_codec and stream_exhausted and chunk_buffer:
+                _raise_incomplete_pcm_frame()
 
             if not receive_task.done():
                 await self._ws.send_json({"type": "stop_session"})
@@ -219,11 +240,32 @@ class STTProxyClient:
                 transcript = rest.get("transcript")
                 _LOGGER.debug("Transcription complete: %s", transcript)
                 return transcript
+            case {"type": "error", "error": error}:
+                raise STTProxyError(error)
             case {"error": error}:
                 raise STTProxyError(error)
             case _:
                 msg = f"Unexpected response: {response}"
                 raise STTProxyError(msg)
+
+    async def _receive_terminal_response(self) -> dict[str, Any]:
+        """Receive messages until a terminal session response is received."""
+        while True:
+            response = await self._receive_json()
+
+            if self._is_terminal_response(response):
+                return response
+
+            _LOGGER.debug("Ignoring non-terminal STT proxy message: %s", response)
+
+    @staticmethod
+    def _is_terminal_response(response: dict[str, Any]) -> bool:
+        """Return True when the response ends the current session."""
+        match response:
+            case {"type": "session_ended"} | {"type": "error"} | {"error": _}:
+                return True
+            case _:
+                return False
 
     async def _receive_json(self) -> dict[str, Any]:
         """Receive a JSON text frame from the WebSocket.

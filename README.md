@@ -19,6 +19,13 @@
 
 After installation, add the integration through **Settings → Devices & Services → Add Integration** and search for **STT Beta**.
 
+The config flow requires:
+
+- `STT Service URL`: A WebSocket endpoint for the proxy, such as `wss://example.com/stt`.
+- `STT Service Key`: The bearer token used to authenticate to the STT proxy.
+
+The integration validates the WebSocket connection during setup, and you can update the URL or key later from the integration's **Reconfigure** action.
+
 ## Development
 
 This integration implements the Home Assistant

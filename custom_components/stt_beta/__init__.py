@@ -32,7 +32,6 @@ async def async_setup_entry(
         session,
         entry.data[CONF_STT_SERVICE_URL],
         entry.data[CONF_STT_SERVICE_KEY],
-        on_disconnect=lambda: hass.config_entries.async_schedule_reload(entry.entry_id),
     )
 
     try:
@@ -42,7 +41,12 @@ async def async_setup_entry(
         raise ConfigEntryNotReady(msg) from err
 
     entry.runtime_data = client
-    await hass.config_entries.async_forward_entry_setups(entry, ["stt"])
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, ["stt"])
+    except Exception:
+        await client.disconnect()
+        raise
+
     return True
 
 
