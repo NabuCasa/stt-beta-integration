@@ -87,6 +87,7 @@ class STTProxyClient:
         if self._ws is not None and not self._ws.closed:
             with contextlib.suppress(aiohttp.ClientError):
                 await self._ws.close()
+        self._ws = None
         _LOGGER.debug("Disconnected from STT proxy")
 
     def _start_idle_listener(self) -> None:
@@ -122,10 +123,7 @@ class STTProxyClient:
                     received.type,
                 )
 
-        if self._ws is not None and not self._ws.closed:
-            with contextlib.suppress(aiohttp.ClientError):
-                await self._ws.close()
-        self._ws = None
+        await self._close_session_ws()
 
         if self._on_disconnect is not None:
             try:
@@ -148,6 +146,8 @@ class STTProxyClient:
             await self._stop_idle_listener()
 
             try:
+                # `transcribe()` temporarily owns the socket and resumes idle
+                # monitoring only when the connection survives the session.
                 if self._ws is None or self._ws.closed:
                     await self._connect_ws()
                 return await self._run_session(metadata, stream)
@@ -216,21 +216,29 @@ class STTProxyClient:
 
             if not receive_task.done():
                 await self._ws.send_json({"type": "stop_session"})
+            response = await receive_task
+            return self._handle_session_ended(response)
         except BaseException:
-            if not receive_task.done():
-                receive_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, STTProxyError):
-                    await receive_task
-            else:
-                with contextlib.suppress(Exception):
-                    receive_task.result()
-            with contextlib.suppress(Exception):
-                await self._ws.close()
-            self._ws = None
+            await self._dispose_receive_task(receive_task)
+            await self._close_session_ws()
             raise
 
-        response = receive_task.result() if receive_task.done() else await receive_task
-        return self._handle_session_ended(response)
+    async def _dispose_receive_task(
+        self, receive_task: asyncio.Task[dict[str, Any]]
+    ) -> None:
+        """Cancel and await the receive task without masking session failures."""
+        if not receive_task.done():
+            receive_task.cancel()
+
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await receive_task
+
+    async def _close_session_ws(self) -> None:
+        """Close the current WebSocket and clear the client reference."""
+        if self._ws is not None and not self._ws.closed:
+            with contextlib.suppress(Exception):
+                await self._ws.close()
+        self._ws = None
 
     @staticmethod
     def _handle_session_ended(response: dict[str, Any]) -> str | None:

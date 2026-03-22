@@ -1,7 +1,7 @@
 import asyncio
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 from homeassistant.components.stt import (
@@ -101,6 +101,8 @@ class TestSTTProxyClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "hello")
         self.assertEqual(ws.sent_bytes, [b"ab", b"cd"])
         self.assertEqual(ws.sent_json[-1], {"type": "stop_session"})
+        self.assertFalse(ws.closed)
+        self.assertIs(client._ws, ws)
 
     async def test_run_session_preserves_opus_chunk_boundaries(self) -> None:
         ws = _FakeWebSocket(
@@ -137,6 +139,20 @@ class TestSTTProxyClient(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ws.closed)
         self.assertIsNone(client._ws)
 
+    async def test_run_session_closes_socket_on_terminal_error(self) -> None:
+        ws = _FakeWebSocket(terminal_response={"type": "error", "error": "boom"})
+        client = STTProxyClient(MagicMock(), "wss://example.com/stt", "token")
+        client._ws = ws
+
+        with self.assertRaisesRegex(STTProxyError, "boom"):
+            await client._run_session(
+                _speech_metadata(AudioCodecs.PCM),
+                _stream_chunks([b"ab"]),
+            )
+
+        self.assertTrue(ws.closed)
+        self.assertIsNone(client._ws)
+
     def test_handle_session_ended_rejects_unexpected_payload(self) -> None:
         with self.assertRaisesRegex(STTProxyError, "Unexpected response"):
             STTProxyClient._handle_session_ended({"type": "session_started"})
@@ -158,3 +174,49 @@ class TestSTTProxyClient(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             await client._receive_terminal_response()
+
+    async def test_run_session_timeout_closes_socket(self) -> None:
+        ws = _FakeWebSocket(
+            initial_messages=[_FakeMessage({"type": "partial", "text": "x"})]
+        )
+        client = STTProxyClient(MagicMock(), "wss://example.com/stt", "token")
+        client._ws = ws
+
+        with (
+            patch.object(
+                stt_client_module, "RECEIVE_TERMINAL_RESPONSE_TIMEOUT", 0.05
+            ),
+            self.assertRaisesRegex(
+                STTProxyConnectionError,
+                "Timed out waiting for terminal response",
+            ),
+        ):
+            await client._run_session(
+                _speech_metadata(AudioCodecs.PCM),
+                _stream_chunks([]),
+            )
+
+        self.assertTrue(ws.closed)
+        self.assertIsNone(client._ws)
+
+    async def test_transcribe_restarts_idle_listener_when_socket_survives(self) -> None:
+        ws = _FakeWebSocket(
+            terminal_response={
+                "type": "session_ended",
+                "reason": "finished",
+                "transcript": "hello",
+            }
+        )
+        client = STTProxyClient(MagicMock(), "wss://example.com/stt", "token")
+        client._ws = ws
+        client._stop_idle_listener = AsyncMock()
+        client._start_idle_listener = MagicMock()
+
+        result = await client.transcribe(
+            _speech_metadata(AudioCodecs.PCM),
+            _stream_chunks([b"ab"]),
+        )
+
+        self.assertEqual(result, "hello")
+        client._stop_idle_listener.assert_awaited_once()
+        client._start_idle_listener.assert_called_once_with()
