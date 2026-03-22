@@ -6,8 +6,10 @@ import aiohttp
 import voluptuous as vol
 
 from custom_components.stt_beta.config_flow import (
+    EmptyKeyError,
     InvalidAuthError,
     _build_data_schema,
+    _normalize_service_url,
     async_validate_input,
 )
 
@@ -61,6 +63,40 @@ class TestConfigFlow(unittest.IsolatedAsyncioTestCase):
         mock_client.assert_called_once_with(session, "wss://example.com/stt", "secret")
         client.connect.assert_awaited_once()
         client.disconnect.assert_awaited_once()
+
+    async def test_async_validate_input_rejects_empty_key(self) -> None:
+        flow = SimpleNamespace(hass=object())
+
+        with self.assertRaises(EmptyKeyError):
+            await async_validate_input(
+                flow,
+                {
+                    "stt_service_url": "wss://example.com/stt",
+                    "stt_service_key": "",
+                },
+            )
+
+    async def test_async_validate_input_rejects_whitespace_only_key(self) -> None:
+        flow = SimpleNamespace(hass=object())
+
+        with self.assertRaises(EmptyKeyError):
+            await async_validate_input(
+                flow,
+                {
+                    "stt_service_url": "wss://example.com/stt",
+                    "stt_service_key": "   ",
+                },
+            )
+
+    def test_normalize_service_url_wraps_url_parse_errors(self) -> None:
+        with (
+            patch(
+                "custom_components.stt_beta.config_flow.URL",
+                side_effect=ValueError("bad"),
+            ),
+            self.assertRaises(vol.Invalid),
+        ):
+            _normalize_service_url("wss://example.com/stt")
 
     async def test_async_validate_input_rejects_invalid_url(self) -> None:
         flow = SimpleNamespace(hass=object())

@@ -1,7 +1,7 @@
 import asyncio
 import json
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import aiohttp
 from homeassistant.components.stt import (
@@ -13,7 +13,12 @@ from homeassistant.components.stt import (
     SpeechMetadata,
 )
 
-from custom_components.stt_beta.client import STTProxyClient, STTProxyError
+import custom_components.stt_beta.client as stt_client_module
+from custom_components.stt_beta.client import (
+    STTProxyClient,
+    STTProxyConnectionError,
+    STTProxyError,
+)
 
 
 class _FakeMessage:
@@ -135,3 +140,21 @@ class TestSTTProxyClient(unittest.IsolatedAsyncioTestCase):
     def test_handle_session_ended_rejects_unexpected_payload(self) -> None:
         with self.assertRaisesRegex(STTProxyError, "Unexpected response"):
             STTProxyClient._handle_session_ended({"type": "session_started"})
+
+    async def test_receive_terminal_response_times_out(self) -> None:
+        ws = _FakeWebSocket(
+            initial_messages=[_FakeMessage({"type": "partial", "text": "x"})]
+        )
+        client = STTProxyClient(MagicMock(), "wss://example.com/stt", "token")
+        client._ws = ws
+
+        with (
+            patch.object(
+                stt_client_module, "RECEIVE_TERMINAL_RESPONSE_TIMEOUT", 0.05
+            ),
+            self.assertRaisesRegex(
+                STTProxyConnectionError,
+                "Timed out waiting for terminal response",
+            ),
+        ):
+            await client._receive_terminal_response()

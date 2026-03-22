@@ -28,6 +28,10 @@ class InvalidAuthError(HomeAssistantError):
     """Error to indicate there is invalid auth."""
 
 
+class EmptyKeyError(HomeAssistantError):
+    """Error to indicate the STT service key is missing."""
+
+
 def _build_data_schema(data: dict[str, str] | None = None) -> vol.Schema:
     """Build the config schema with selectors and defaults."""
     data = data or {}
@@ -55,7 +59,12 @@ def _normalize_service_url(url: str) -> str:
         msg = "URL cannot be empty"
         raise vol.Invalid(msg)
 
-    parsed = URL(normalized)
+    try:
+        parsed = URL(normalized)
+    except (TypeError, ValueError) as err:
+        msg = "URL must be a valid ws:// or wss:// address"
+        raise vol.Invalid(msg) from err
+
     if parsed.scheme not in ("ws", "wss") or parsed.host is None:
         msg = "URL must be a valid ws:// or wss:// address"
         raise vol.Invalid(msg)
@@ -72,9 +81,9 @@ async def async_validate_input(
         CONF_STT_SERVICE_KEY: user_input[CONF_STT_SERVICE_KEY],
     }
 
-    if not validated_data[CONF_STT_SERVICE_KEY]:
+    if not validated_data[CONF_STT_SERVICE_KEY].strip():
         msg = "Service key cannot be empty"
-        raise InvalidAuthError(msg)
+        raise EmptyKeyError(msg)
 
     client = STTProxyClient(
         async_get_clientsession(flow.hass),
@@ -116,6 +125,8 @@ class STTBetaConfigFlow(ConfigFlow, domain=DOMAIN):
                 validated_data = await async_validate_input(self, user_input)
             except vol.Invalid:
                 errors["base"] = "invalid_url"
+            except EmptyKeyError:
+                errors["base"] = "key_required"
             except InvalidAuthError:
                 errors["base"] = "invalid_auth"
             except CannotConnectError:
@@ -144,6 +155,8 @@ class STTBetaConfigFlow(ConfigFlow, domain=DOMAIN):
                 validated_data = await async_validate_input(self, user_input)
             except vol.Invalid:
                 errors["base"] = "invalid_url"
+            except EmptyKeyError:
+                errors["base"] = "key_required"
             except InvalidAuthError:
                 errors["base"] = "invalid_auth"
             except CannotConnectError:

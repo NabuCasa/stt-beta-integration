@@ -8,7 +8,8 @@
       "cannot_connect": "Failed to connect to the STT service.",
       "invalid_auth": "The STT service key is invalid.",
       "invalid_url": "Enter a valid WebSocket URL beginning with ws:// or wss://.",
-      "unknown": "Unexpected error"
+      "key_required": "Enter the STT service key.",
+      "unknown": "Unexpected error."
     },
     "step": {
       "reconfigure": {

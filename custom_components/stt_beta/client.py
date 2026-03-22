@@ -26,6 +26,9 @@ _LOGGER = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL = 300
 
+# Max time to wait for a terminal session response (partial messages may precede it).
+RECEIVE_TERMINAL_RESPONSE_TIMEOUT = 600
+
 
 def _raise_incomplete_pcm_frame() -> None:
     """Raise an error for a truncated PCM frame."""
@@ -250,13 +253,20 @@ class STTProxyClient:
 
     async def _receive_terminal_response(self) -> dict[str, Any]:
         """Receive messages until a terminal session response is received."""
-        while True:
-            response = await self._receive_json()
+        try:
+            async with asyncio.timeout(RECEIVE_TERMINAL_RESPONSE_TIMEOUT):
+                while True:
+                    response = await self._receive_json()
 
-            if self._is_terminal_response(response):
-                return response
+                    if self._is_terminal_response(response):
+                        return response
 
-            _LOGGER.debug("Ignoring non-terminal STT proxy message: %s", response)
+                    _LOGGER.debug(
+                        "Ignoring non-terminal STT proxy message: %s", response
+                    )
+        except TimeoutError as err:
+            msg = "Timed out waiting for terminal response from STT proxy"
+            raise STTProxyConnectionError(msg) from err
 
     @staticmethod
     def _is_terminal_response(response: dict[str, Any]) -> bool:
