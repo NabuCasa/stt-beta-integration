@@ -1,6 +1,25 @@
 {
   "config": {
+    "abort": {
+      "already_configured": "Only one STT Beta integration can be configured.",
+      "reconfigure_successful": "The STT Beta configuration was updated."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the STT service.",
+      "invalid_auth": "The STT service key is invalid.",
+      "invalid_url": "Enter a valid WebSocket URL beginning with ws:// or wss://.",
+      "key_required": "Enter the STT service key.",
+      "unknown": "Unexpected error."
+    },
     "step": {
+      "reconfigure": {
+        "title": "Reconfigure STT Beta",
+        "description": "Update your STT service connection.",
+        "data": {
+          "stt_service_url": "STT Service URL",
+          "stt_service_key": "STT Service Key"
+        }
+      },
       "user": {
         "title": "STT Beta",
         "description": "Configure your STT service connection.",
