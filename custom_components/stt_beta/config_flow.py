@@ -32,9 +32,16 @@ class EmptyKeyError(HomeAssistantError):
     """Error to indicate the STT service key is missing."""
 
 
-def _build_data_schema(data: dict[str, str] | None = None) -> vol.Schema:
+def _build_data_schema(
+    data: dict[str, str] | None = None,
+    *,
+    include_key_default: bool = True,
+    require_key: bool = True,
+) -> vol.Schema:
     """Build the config schema with selectors and defaults."""
     data = data or {}
+    key_marker = vol.Required if require_key else vol.Optional
+    key_default = data.get(CONF_STT_SERVICE_KEY, "") if include_key_default else ""
 
     return vol.Schema(
         {
@@ -43,8 +50,9 @@ def _build_data_schema(data: dict[str, str] | None = None) -> vol.Schema:
             ): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
             ),
-            vol.Required(
-                CONF_STT_SERVICE_KEY, default=data.get(CONF_STT_SERVICE_KEY, "")
+            key_marker(
+                CONF_STT_SERVICE_KEY,
+                default=key_default,
             ): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
             ),
@@ -152,8 +160,14 @@ class STTBetaConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
 
         if user_input is not None:
+            reconfigure_input = dict(user_input)
+            if not reconfigure_input.get(CONF_STT_SERVICE_KEY, "").strip():
+                reconfigure_input[CONF_STT_SERVICE_KEY] = entry.data[
+                    CONF_STT_SERVICE_KEY
+                ]
+
             try:
-                validated_data = await async_validate_input(self, user_input)
+                validated_data = await async_validate_input(self, reconfigure_input)
             except vol.Invalid:
                 errors["base"] = "invalid_url"
             except EmptyKeyError:
@@ -172,6 +186,8 @@ class STTBetaConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=_build_data_schema(dict(entry.data)),
+            data_schema=_build_data_schema(
+                dict(entry.data), include_key_default=False, require_key=False
+            ),
             errors=errors,
         )

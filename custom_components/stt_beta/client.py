@@ -226,7 +226,7 @@ class STTProxyClient:
     async def _dispose_receive_task(
         self, receive_task: asyncio.Task[dict[str, Any]]
     ) -> None:
-        """Cancel and await the receive task without masking session failures."""
+        """Cancel and drain the receive task without hiding the original failure."""
         if not receive_task.done():
             receive_task.cancel()
 
