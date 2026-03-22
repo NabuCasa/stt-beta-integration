@@ -64,6 +64,39 @@ class TestConfigFlow(unittest.IsolatedAsyncioTestCase):
         client.connect.assert_awaited_once()
         client.disconnect.assert_awaited_once()
 
+    async def test_async_validate_input_strips_service_key(self) -> None:
+        flow = SimpleNamespace(hass=object())
+        session = object()
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.disconnect = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.stt_beta.config_flow.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.stt_beta.config_flow.STTProxyClient",
+                return_value=client,
+            ) as mock_client,
+        ):
+            validated = await async_validate_input(
+                flow,
+                {
+                    "stt_service_url": "wss://example.com/stt",
+                    "stt_service_key": "  trimmed-secret  ",
+                },
+            )
+
+        self.assertEqual(
+            validated["stt_service_key"],
+            "trimmed-secret",
+        )
+        mock_client.assert_called_once_with(
+            session, "wss://example.com/stt", "trimmed-secret"
+        )
+
     async def test_async_validate_input_rejects_empty_key(self) -> None:
         flow = SimpleNamespace(hass=object())
 

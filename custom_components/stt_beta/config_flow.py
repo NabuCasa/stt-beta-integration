@@ -76,19 +76,20 @@ async def async_validate_input(
     flow: ConfigFlow, user_input: dict[str, str]
 ) -> dict[str, str]:
     """Validate the user input allows us to connect."""
+    service_key = user_input[CONF_STT_SERVICE_KEY].strip()
     validated_data = {
         CONF_STT_SERVICE_URL: _normalize_service_url(user_input[CONF_STT_SERVICE_URL]),
-        CONF_STT_SERVICE_KEY: user_input[CONF_STT_SERVICE_KEY],
+        CONF_STT_SERVICE_KEY: service_key,
     }
 
-    if not validated_data[CONF_STT_SERVICE_KEY].strip():
+    if not service_key:
         msg = "Service key cannot be empty"
         raise EmptyKeyError(msg)
 
     client = STTProxyClient(
         async_get_clientsession(flow.hass),
         validated_data[CONF_STT_SERVICE_URL],
-        validated_data[CONF_STT_SERVICE_KEY],
+        service_key,
     )
 
     try:

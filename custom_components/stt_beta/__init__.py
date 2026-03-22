@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -44,7 +45,8 @@ async def async_setup_entry(
     try:
         await hass.config_entries.async_forward_entry_setups(entry, ["stt"])
     except Exception:
-        await client.disconnect()
+        with contextlib.suppress(Exception):
+            await client.disconnect()
         raise
 
     return True
