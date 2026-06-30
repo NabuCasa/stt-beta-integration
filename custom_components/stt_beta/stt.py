@@ -14,6 +14,7 @@ from homeassistant.components.stt import (
     SpeechResult,
     SpeechResultState,
     SpeechToTextEntity,
+    SpeechAudioProcessing,
 )
 
 from .client import STTProxyConnectionError, STTProxyError
@@ -80,6 +81,15 @@ class STTBetaEntity(SpeechToTextEntity):
     def supported_channels(self) -> list[AudioChannels]:
         """Return a list of supported channels."""
         return [AudioChannels.CHANNEL_MONO]
+
+    @property
+    def audio_processing(self) -> SpeechAudioProcessing:
+        """Return required/preferred input audio processing settings."""
+        return SpeechAudioProcessing(
+            requires_external_vad=False,
+            prefers_auto_gain_enabled=False,
+            prefers_noise_reduction_enabled=False,
+        )
 
     async def async_process_audio_stream(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
