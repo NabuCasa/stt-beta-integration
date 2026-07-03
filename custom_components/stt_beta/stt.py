@@ -86,7 +86,7 @@ class STTBetaEntity(SpeechToTextEntity):
     def audio_processing(self) -> SpeechAudioProcessing:
         """Return required/preferred input audio processing settings."""
         return SpeechAudioProcessing(
-            requires_external_vad=False,
+            requires_external_vad=True,
             prefers_auto_gain_enabled=False,
             prefers_noise_reduction_enabled=False,
         )
@@ -106,9 +106,7 @@ class STTBetaEntity(SpeechToTextEntity):
             text = await self._client.transcribe(metadata, stream)
         except STTProxyConnectionError:
             _LOGGER.exception("STT proxy connection lost, scheduling reload")
-            self.hass.config_entries.async_schedule_reload(
-                self._config_entry.entry_id
-            )
+            self.hass.config_entries.async_schedule_reload(self._config_entry.entry_id)
             return SpeechResult(text=None, result=SpeechResultState.ERROR)
         except STTProxyError:
             _LOGGER.exception("STT proxy error during transcription")
