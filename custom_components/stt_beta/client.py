@@ -112,6 +112,7 @@ class STTProxyClient:
             _LOGGER.exception("Unexpected error on STT proxy WebSocket")
         else:
             if received.type in (
+                aiohttp.WSMsgType.CLOSE,
                 aiohttp.WSMsgType.CLOSED,
                 aiohttp.WSMsgType.CLOSING,
                 aiohttp.WSMsgType.ERROR,
@@ -300,6 +301,7 @@ class STTProxyClient:
                 raise STTProxyError(msg) from err
 
         if received.type in (
+            aiohttp.WSMsgType.CLOSE,
             aiohttp.WSMsgType.CLOSED,
             aiohttp.WSMsgType.CLOSING,
             aiohttp.WSMsgType.ERROR,
